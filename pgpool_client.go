@@ -19,6 +19,7 @@ const (
 	PCPNodeCount = "/usr/sbin/pcp_node_count"
 	PCPNodeInfo  = "/usr/sbin/pcp_node_info"
 	PCPProcCount = "/usr/sbin/pcp_proc_count"
+	PCPProcInfo  = "/usr/sbin/pcp_proc_info"
 
 	NodeStatusInitialization = "Initialization"
 	NodeStatusUP1            = "Node is up. No connection yet"
@@ -28,7 +29,8 @@ const (
 )
 
 var (
-	PCPValueRegExp = regexp.MustCompile(`^[^:]+: (.*)$`)
+	PCPValueRegExp      = regexp.MustCompile(`^[^:]+: (.*)$`)
+	PCPConnectionRegExp = regexp.MustCompile(`^(\w+).*([0-1]{1})$`)
 
 	nodeStatusToString = map[int]string{
 		0: NodeStatusInitialization,
@@ -177,6 +179,54 @@ func (p *PGPoolClient) ExecNodeInfo(nodeID int) (NodeInfo, error) {
 	return nodeInfo, nil
 }
 
+func (p *PGPoolClient) ExecProcInfo() ([]ProcInfo, error) {
+	bytesBuffer, err := p.execCommand(PCPProcInfo)
+	if err != nil {
+		return []ProcInfo{}, err
+	}
+	procInfoArr, err := ProcInfoUnmarshal(bytesBuffer)
+	if err != nil {
+		return []ProcInfo{}, err
+	}
+	return procInfoArr, nil
+}
+
+type ProcInfoSummary struct {
+	Active   map[string]int
+	Inactive map[string]int
+}
+
+func NewProcInfoSummary() ProcInfoSummary {
+	return ProcInfoSummary{
+		Active:   make(map[string]int),
+		Inactive: make(map[string]int),
+	}
+}
+
+func (p *ProcInfoSummary) Add(database string, active bool) {
+	if active {
+		_, ok := p.Active[database]
+		if !ok {
+			p.Active[database] = 0
+		}
+		p.Active[database] += 1
+		return
+	}
+	_, ok := p.Inactive[database]
+	if !ok {
+		p.Inactive[database] = 0
+	}
+	p.Inactive[database] += 1
+}
+
+func (p *PGPoolClient) ProcInfoSummary(pi []ProcInfo) ProcInfoSummary {
+	summary := NewProcInfoSummary()
+	for _, procInfo := range pi {
+		summary.Add(procInfo.Database, procInfo.Connected)
+	}
+	return summary
+}
+
 func (p *PGPoolClient) ExecProcCount() ([]string, error) {
 	bytesBuffer, err := p.execCommand(PCPProcCount)
 	if err != nil {
@@ -189,4 +239,37 @@ func (p *PGPoolClient) ExecProcCount() ([]string, error) {
 	procCountString := strings.TrimSpace(string(bytes))
 	procCountArr := strings.Split(procCountString, " ")
 	return procCountArr, nil
+}
+
+type ProcInfo struct {
+	Database  string
+	Connected bool
+}
+
+func ProcInfoUnmarshal(cmdOutBuff io.Reader) ([]ProcInfo, error) {
+	var pi []ProcInfo
+	reader := bufio.NewReader(cmdOutBuff)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				return pi, err
+			}
+		}
+		line = strings.TrimSpace(line)
+		valueArr := PCPConnectionRegExp.FindStringSubmatch(line)
+		if len(valueArr) > 1 {
+			procInfo := ProcInfo{
+				Database:  valueArr[1],
+				Connected: false,
+			}
+			if valueArr[2] == "1" {
+				procInfo.Connected = true
+			}
+			pi = append(pi, procInfo)
+		}
+	}
+	return pi, nil
 }

@@ -14,20 +14,30 @@ const (
 )
 
 var (
-	PGPoolNodeCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "pcp_node_count"),
+	PoolNodeCount = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "node_count"),
 		"Displays the total number of database nodes",
 		nil, nil,
 	)
-	PGPoolNodeInfo = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "pcp_node_info"),
+	PoolNodeInfo = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "node_info"),
 		"Displays the information of node",
-		[]string{"id", "hostname", "port", "status", "width"}, nil,
+		[]string{"id", "node", "port", "width"}, nil,
 	)
-	PGPoolProcCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "pcp_proc_count"),
-		"Displays count of all Pgpool-II children processes",
+	PoolProcCount = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "proc_count"),
+		"Displays number of all Pgpool-II children processes",
 		nil, nil,
+	)
+	PoolNumberActiveConnections = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "frontend_active_connections"),
+		"Displays number of all active connections to all Pgpool-II children processes",
+		[]string{"database"}, nil,
+	)
+	PoolNumberInactiveConnections = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "frontend_inactive_connections"),
+		"Displays number of all inactive connections to all Pgpool-II children processes",
+		[]string{"database"}, nil,
 	)
 )
 
@@ -50,13 +60,13 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	if err != nil {
 		logrus.Error(err)
 		ch <- prometheus.MustNewConstMetric(
-			PGPoolNodeCount,
+			PoolNodeCount,
 			prometheus.GaugeValue,
 			0.0,
 		)
 	} else {
 		ch <- prometheus.MustNewConstMetric(
-			PGPoolNodeCount,
+			PoolNodeCount,
 			prometheus.GaugeValue,
 			float64(nodeCount),
 		)
@@ -64,39 +74,62 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 			nodeInfo, err := e.pgpool.ExecNodeInfo(i)
 			if err != nil {
 				logrus.Error(err)
-			} else {
-				ch <- prometheus.MustNewConstMetric(
-					PGPoolNodeInfo,
-					prometheus.GaugeValue,
-					1.0,
-					strconv.Itoa(i),
-					nodeInfo.Hostname,
-					strconv.Itoa(nodeInfo.Port),
-					strconv.Itoa(nodeInfo.Status),
-					strconv.FormatFloat(nodeInfo.Weight, 'f', 6, 64),
-				)
+				continue
 			}
+			ch <- prometheus.MustNewConstMetric(
+				PoolNodeInfo,
+				prometheus.GaugeValue,
+				float64(nodeInfo.Status),
+				strconv.Itoa(i),
+				nodeInfo.Hostname,
+				strconv.Itoa(nodeInfo.Port),
+				strconv.FormatFloat(nodeInfo.Weight, 'f', 6, 64),
+			)
 		}
 	}
 	procArr, err := e.pgpool.ExecProcCount()
 	if err != nil {
 		logrus.Error(err)
 		ch <- prometheus.MustNewConstMetric(
-			PGPoolProcCount,
+			PoolProcCount,
 			prometheus.GaugeValue,
 			0.0,
 		)
 	} else {
 		ch <- prometheus.MustNewConstMetric(
-			PGPoolProcCount,
+			PoolProcCount,
 			prometheus.GaugeValue,
 			float64(len(procArr)),
 		)
 	}
+	procInfoArr, err := e.pgpool.ExecProcInfo()
+	if err != nil {
+		logrus.Error(err)
+	} else {
+		procSummary := e.pgpool.ProcInfoSummary(procInfoArr)
+		for database, counter := range procSummary.Active {
+			ch <- prometheus.MustNewConstMetric(
+				PoolNumberActiveConnections,
+				prometheus.GaugeValue,
+				float64(counter),
+				database,
+			)
+		}
+		for database, counter := range procSummary.Inactive {
+			ch <- prometheus.MustNewConstMetric(
+				PoolNumberInactiveConnections,
+				prometheus.GaugeValue,
+				float64(counter),
+				database,
+			)
+		}
+	}
 }
 
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
-	ch <- PGPoolNodeCount
-	ch <- PGPoolProcCount
-	ch <- PGPoolNodeInfo
+	ch <- PoolNodeCount
+	ch <- PoolProcCount
+	ch <- PoolNodeInfo
+	ch <- PoolNumberActiveConnections
+	ch <- PoolNumberInactiveConnections
 }
