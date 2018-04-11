@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -12,6 +13,7 @@ import (
 )
 
 var (
+	showVersion             = flag.Bool("version", false, "Prints version information and exit")
 	metricsPath             = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 	listenAddress           = flag.String("web.listen-address", ":9190", "Address on which to expose metrics and web interface.")
 	pgpoolHostname          = flag.String("pgpool.host", "127.0.0.1", "PgPool2 hostname")
@@ -21,8 +23,20 @@ var (
 	pgpoolConnectionTimeout = flag.Int("pgpool.timeout", 10, "PgPool2 connection timeout in seconds")
 )
 
+func versionInfo() {
+	fmt.Println(version.Print(exporterName))
+	os.Exit(0)
+}
+
 func main() {
 	flag.Parse()
+
+	if *showVersion == true {
+		versionInfo()
+	}
+
+	logrus.Infof("Starting %s %s...", exporterName, version.Version)
+
 	pgpool := &PGPoolClient{
 		Hostname:         *pgpoolHostname,
 		Port:             *pgpoolPort,
@@ -42,6 +56,7 @@ func main() {
 	}
 
 	logrus.Infof("Listen address: %s", *listenAddress)
+
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<html>
