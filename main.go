@@ -15,9 +15,9 @@ import (
 var (
 	showVersion             = flag.Bool("version", false, "Prints version information and exit")
 	metricsPath             = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
-	listenAddress           = flag.String("web.listen-address", ":9190", "Address on which to expose metrics and web interface.")
+	listenAddress           = flag.String("web.listen-address", ":9288", "Address on which to expose metrics and web interface.")
 	pgpoolHostname          = flag.String("pgpool.host", "127.0.0.1", "PgPool2 hostname")
-	pgpoolPort              = flag.Int("pgpool.port", 9288, "PgPool2 port")
+	pgpoolPort              = flag.Int("pgpool.port", 9898, "PgPool2 port")
 	pgpoolUsername          = flag.String("pgpool.username", "pcpadmin", "PgPool2 username")
 	pgpoolPassword          = flag.String("pgpool.password", "", "PgPool2 password")
 	pgpoolConnectionTimeout = flag.Int("pgpool.timeout", 10, "PgPool2 connection timeout in seconds")
