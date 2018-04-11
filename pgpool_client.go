@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	// http://www.pgpool.net/docs/latest/en/html/pcp-commands.html
 	PCPNodeCount = "/usr/sbin/pcp_node_count"
 	PCPNodeInfo  = "/usr/sbin/pcp_node_info"
 	PCPProcCount = "/usr/sbin/pcp_proc_count"
