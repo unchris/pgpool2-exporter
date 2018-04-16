@@ -2,6 +2,7 @@ package main
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/version"
@@ -14,6 +15,16 @@ const (
 )
 
 var (
+	PoolLastScrapeError = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "last_scrape_error"),
+		"Whether the last scrape of metrics from Pgpool2 resulted in an error (1 for error, 0 for success)",
+		nil, nil,
+	)
+	PoolLastScrapeDuration = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "last_scrape_duration_seconds"),
+		"Duration of the last scrape of metrics from Pgpool2",
+		nil, nil,
+	)
 	PoolNodeCount = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "node_count"),
 		"Displays the total number of database nodes",
@@ -56,9 +67,18 @@ func NewExporter(pgpool *PGPoolClient) *Exporter {
 }
 
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
+	var scrapeError bool
+	defer func(begun time.Time) {
+		ch <- prometheus.MustNewConstMetric(
+			PoolLastScrapeDuration,
+			prometheus.GaugeValue,
+			time.Since(begun).Seconds(),
+		)
+	}(time.Now())
 	nodeCount, err := e.pgpool.ExecNodeCount()
 	if err != nil {
-		logrus.Error(err)
+		scrapeError = true
+		logrus.Errorf("ExecNodeCount error: %v", err)
 		ch <- prometheus.MustNewConstMetric(
 			PoolNodeCount,
 			prometheus.GaugeValue,
@@ -73,7 +93,8 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 		for i := 0; i < nodeCount; i++ {
 			nodeInfo, err := e.pgpool.ExecNodeInfo(i)
 			if err != nil {
-				logrus.Error(err)
+				scrapeError = true
+				logrus.Errorf("ExecNodeInfo error: %v", err)
 				continue
 			}
 			ch <- prometheus.MustNewConstMetric(
@@ -89,7 +110,8 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	}
 	procArr, err := e.pgpool.ExecProcCount()
 	if err != nil {
-		logrus.Error(err)
+		scrapeError = true
+		logrus.Errorf("ExecProcCount error: %v", err)
 		ch <- prometheus.MustNewConstMetric(
 			PoolProcCount,
 			prometheus.GaugeValue,
@@ -104,7 +126,8 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	}
 	procInfoArr, err := e.pgpool.ExecProcInfo()
 	if err != nil {
-		logrus.Error(err)
+		scrapeError = true
+		logrus.Errorf("ExecProcInfo error: %v", err)
 	} else {
 		procSummary := e.pgpool.ProcInfoSummary(procInfoArr)
 		for database, counter := range procSummary.Active {
@@ -124,9 +147,20 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 			)
 		}
 	}
+	scrapeErrorFloat := 0.0
+	if scrapeError {
+		scrapeErrorFloat = 1.0
+	}
+	ch <- prometheus.MustNewConstMetric(
+		PoolLastScrapeError,
+		prometheus.GaugeValue,
+		scrapeErrorFloat,
+	)
 }
 
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
+	ch <- PoolLastScrapeError
+	ch <- PoolLastScrapeDuration
 	ch <- PoolNodeCount
 	ch <- PoolProcCount
 	ch <- PoolNodeInfo

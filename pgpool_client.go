@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -75,7 +73,6 @@ func (p *PGPoolClient) execCommand(cmd string, arg ...string) (*bytes.Buffer, er
 	pgpoolExec.Stdout = stdoutBuffer
 	err := pgpoolExec.Run()
 	if err != nil {
-		logrus.Errorf("tried to execute %s and got error: %v", cmd, err)
 		return stdoutBuffer, err
 	}
 	return stdoutBuffer, nil
