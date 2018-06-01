@@ -24,7 +24,7 @@ const (
 
 	NodeStatusInitialization = "Initialization"
 	NodeStatusUP1            = "Node is up. No connection yet"
-	NodeStatusUP2            = "Node is uo. Connections are pooled"
+	NodeStatusUP2            = "Node is up. Connections are pooled"
 	NodeStatusDown           = "Node is down"
 	NodeStatusUnknown        = "Unknown node status"
 
