@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/leominov/pgpool2-exporter/pgpool2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
@@ -13,14 +16,14 @@ import (
 )
 
 var (
-	showVersion             = flag.Bool("version", false, "Prints version information and exit")
-	metricsPath             = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
-	listenAddress           = flag.String("web.listen-address", ":9288", "Address on which to expose metrics and web interface.")
-	pgpoolHostname          = flag.String("pgpool.host", "127.0.0.1", "PgPool2 hostname")
-	pgpoolPort              = flag.Int("pgpool.port", 9898, "PgPool2 port")
-	pgpoolUsername          = flag.String("pgpool.username", "pcpadmin", "PgPool2 username")
-	pgpoolPassword          = flag.String("pgpool.password", "", "PgPool2 password")
-	pgpoolConnectionTimeout = flag.Int("pgpool.timeout", 10, "PgPool2 connection timeout in seconds")
+	showVersion   = flag.Bool("version", false, "Prints version information and exit")
+	metricsPath   = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
+	listenAddress = flag.String("web.listen-address", ":9288", "Address on which to expose metrics and web interface.")
+	pcpPassFile   = flag.String("pcp.passfile", "", "Path to the PCP password file containing hostname:port:username:password")
+	pcpHostname   = flag.String("pcp.host", "127.0.0.1", "PCP hostname")
+	pcpPort       = flag.Int("pcp.port", 9898, "PCP port")
+	pcpUsername   = flag.String("pcp.username", "pcpadmin", "PCP username")
+	pcpPassword   = flag.String("pcp.password", "", "PCP password")
 )
 
 func versionInfo() {
@@ -35,27 +38,47 @@ func main() {
 		versionInfo()
 	}
 
+	errChan := make(chan error, 10)
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+
 	logrus.Infof("Starting %s %s...", exporterName, version.Version)
+	logrus.Infof("Listen address: %s", *listenAddress)
 
-	pgpool := &PGPoolClient{
-		Hostname:         *pgpoolHostname,
-		Port:             *pgpoolPort,
-		Username:         *pgpoolUsername,
-		Password:         *pgpoolPassword,
-		TimeoutInSeconds: *pgpoolConnectionTimeout,
+	options := pgpool2.Options{
+		Username: *pcpUsername,
+		Password: *pcpPassword,
+		Hostname: *pcpHostname,
+		Port:     *pcpPort,
+		PassFile: *pcpPassFile,
 	}
-	err := pgpool.Validate()
+
+	pgpool2Client, err := pgpool2.NewClient(options)
 	if err != nil {
-		logrus.Error(err)
-		os.Exit(1)
-	}
-
-	exporter := NewExporter(pgpool)
-	if err := prometheus.Register(exporter); err != nil {
 		logrus.Fatal(err)
 	}
 
-	logrus.Infof("Listen address: %s", *listenAddress)
+	go func() {
+		for {
+			select {
+			case err := <-errChan:
+				if err != nil {
+					pgpool2Client.Clean()
+					logrus.Fatal(err)
+				}
+			case signal := <-signalChan:
+				logrus.Infof("Captured %v. Exiting...", signal)
+				pgpool2Client.Clean()
+				logrus.Info("Bye")
+				os.Exit(0)
+			}
+		}
+	}()
+
+	exporter := NewExporter(pgpool2Client)
+	if err := prometheus.Register(exporter); err != nil {
+		errChan <- err
+	}
 
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -68,5 +91,6 @@ func main() {
 			</html>
 		`))
 	})
-	logrus.Fatal(http.ListenAndServe(*listenAddress, nil))
+
+	errChan <- http.ListenAndServe(*listenAddress, nil)
 }

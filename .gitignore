@@ -28,3 +28,4 @@ pgpool2-exporter
 .tarballs/
 coverage.out
 debug.test
+.pcppass
