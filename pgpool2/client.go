@@ -442,7 +442,6 @@ func ProcInfoUnmarshal(cmdOutBuff io.Reader) ([]ProcInfo, error) {
 		}
 		line = strings.TrimSpace(line)
 		connectionInfo := strings.Split(line, " ")
-		fmt.Printf("%d - %#v\n", len(connectionInfo), connectionInfo)
 		if len(connectionInfo) == 13 {
 			procInfo := ProcInfo{
 				Database: connectionInfo[0],
