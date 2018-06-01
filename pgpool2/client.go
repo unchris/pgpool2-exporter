@@ -38,8 +38,7 @@ const (
 )
 
 var (
-	PCPValueRegExp      = regexp.MustCompile(`^[^:]+: (.*)$`)
-	PCPConnectionRegExp = regexp.MustCompile(`^(\w+).*([0-1]{1})$`)
+	PCPValueRegExp = regexp.MustCompile(`^[^:]+: (.*)$`)
 
 	nodeStatusToString = map[int]string{
 		0: NodeStatusInitialization,
@@ -425,6 +424,7 @@ func WatchdogInfoUnmarshal(cmdOutBuff io.Reader) (WatchdogInfo, error) {
 
 type ProcInfo struct {
 	Database  string
+	Username  string
 	Connected bool
 }
 
@@ -440,14 +440,15 @@ func ProcInfoUnmarshal(cmdOutBuff io.Reader) ([]ProcInfo, error) {
 				return pi, err
 			}
 		}
-		//line = strings.TrimSpace(line)
-		valueArr := PCPConnectionRegExp.FindStringSubmatch(line)
-		if len(valueArr) > 1 {
+		line = strings.TrimSpace(line)
+		connectionInfo := strings.Split(line, " ")
+		fmt.Printf("%d - %#v\n", len(connectionInfo), connectionInfo)
+		if len(connectionInfo) == 13 {
 			procInfo := ProcInfo{
-				Database:  valueArr[1],
-				Connected: false,
+				Database: connectionInfo[0],
+				Username: connectionInfo[1],
 			}
-			if valueArr[2] == "1" {
+			if connectionInfo[12] == "1" {
 				procInfo.Connected = true
 			}
 			pi = append(pi, procInfo)
