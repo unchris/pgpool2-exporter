@@ -23,7 +23,7 @@ const (
 	PCPWatchdogInfo = "/usr/sbin/pcp_watchdog_info"
 
 	NodeStatusInitialization = "Initialization"
-	NodeStatusUP1            = "Node is up. No connection yet"
+	NodeStatusUP1            = "Node is up. No connections yet"
 	NodeStatusUP2            = "Node is up. Connections are pooled"
 	NodeStatusDown           = "Node is down"
 	NodeStatusUnknown        = "Unknown node status"
