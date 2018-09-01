@@ -189,6 +189,9 @@ func (c *Client) ExecNodeCount() (int, error) {
 		return 0, err
 	}
 	resultString := strings.TrimSpace(string(bytes))
+	if len(resultString) == 0 {
+		return 0, nil
+	}
 	resultInt, err := strconv.Atoi(resultString)
 	if err != nil {
 		return 0, err
@@ -311,14 +314,14 @@ func (p *ProcInfoSummary) Add(database string, active bool) {
 		if !ok {
 			p.Active[database] = 0
 		}
-		p.Active[database] += 1
+		p.Active[database]++
 		return
 	}
 	_, ok := p.Inactive[database]
 	if !ok {
 		p.Inactive[database] = 0
 	}
-	p.Inactive[database] += 1
+	p.Inactive[database]++
 }
 
 func (c *Client) ProcInfoSummary(pi []ProcInfo) ProcInfoSummary {
