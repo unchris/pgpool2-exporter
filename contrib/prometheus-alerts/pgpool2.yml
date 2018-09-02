@@ -19,7 +19,6 @@ groups:
           summary: Prometheus Pgpool2 Exporter {{ $labels.instance }} scrape error
       - alert: Pgpool2BackendDown
         expr: pgpool2_node_info == 3
-        for: 3m
         labels:
           severity: critical
           env: "{{ $labels.env }}"
