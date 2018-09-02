@@ -1,0 +1,27 @@
+---
+groups:
+  - name: Pgpool2
+    rules:
+      - alert: Pgpool2ExporterDown
+        expr: up{job = "pgpool2"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          env: "{{ $labels.env }}"
+        annotations:
+          summary: Prometheus Pgpool2 Exporter {{ $labels.instance }} is unavailable
+      - alert: Pgpool2LastScrapeError
+        expr: pgpool2_last_scrape_error != 0
+        labels:
+          severity: warning
+          env: "{{ $labels.env }}"
+        annotations:
+          summary: Prometheus Pgpool2 Exporter {{ $labels.instance }} scrape error
+      - alert: Pgpool2BackendDown
+        expr: pgpool2_node_info == 3
+        for: 3m
+        labels:
+          severity: critical
+          env: "{{ $labels.env }}"
+        annotations:
+          summary: PostgreSQL instance {{ $labels.node }} is unavailable for Pgpool2 {{ $labels.instance }}
