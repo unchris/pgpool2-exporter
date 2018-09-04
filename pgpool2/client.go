@@ -12,9 +12,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/coreos/go-semver/semver"
 )
 
 const (
+	// PGPool binary
+	PGPool = "pgpool"
+
 	// http://www.pgpool.net/docs/latest/en/html/pcp-commands.html
 	PCPNodeCount    = "/usr/sbin/pcp_node_count"
 	PCPNodeInfo     = "/usr/sbin/pcp_node_info"
@@ -38,7 +43,10 @@ const (
 )
 
 var (
-	PCPValueRegExp = regexp.MustCompile(`^[^:]+: (.*)$`)
+	PCPValueRegExp      = regexp.MustCompile(`^[^:]+: (.*)$`)
+	PGPoolVersionRegExp = regexp.MustCompile(`([0-9]+.[0-9]+.[0-9]+)`)
+
+	PGPoolPCPPassFileSince = semver.New("3.5.0")
 
 	nodeStatusToString = map[int]string{
 		0: NodeStatusInitialization,
@@ -62,18 +70,25 @@ type Options struct {
 	Port     int
 	Username string
 	Password string
+	Timeout  int
 }
 
 type Client struct {
-	options         Options
-	pcpPassFile     string
-	pcpPassFileUser bool
-	pcpPassTempFile *os.File
+	options            Options
+	version            *semver.Version
+	pcpPassFileSupport bool
+	pcpPassFile        string
+	pcpPassFileUser    bool
+	pcpPassTempFile    *os.File
 }
 
 func NewClient(options Options) (*Client, error) {
 	client := &Client{
 		options: options,
+	}
+	ok, err := client.IsSupportPCPPassFile()
+	if err != nil {
+		return nil, err
 	}
 	if len(options.PassFile) != 0 {
 		client.pcpPassFile = options.PassFile
@@ -82,10 +97,56 @@ func NewClient(options Options) (*Client, error) {
 	if err := client.Validate(); err != nil {
 		return nil, err
 	}
-	if err := client.createPCPTempFile(); err != nil {
-		return nil, err
+	if ok {
+		client.pcpPassFileSupport = true
+		if err := client.createPCPTempFile(); err != nil {
+			return nil, err
+		}
 	}
 	return client, nil
+}
+
+func (c *Client) IsSupportPCPPassFile() (bool, error) {
+	version, err := c.Version()
+	if err != nil {
+		return false, err
+	}
+	if version.LessThan(*PGPoolPCPPassFileSince) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (c *Client) Version() (*semver.Version, error) {
+	if c.version != nil {
+		return c.version, nil
+	}
+	_, bytesBuffer, err := c.execCommand(PGPool, []string{}, "--version")
+	if err != nil {
+		return nil, fmt.Errorf("error getting version information: %v", err)
+	}
+	resultString := strings.TrimSpace(bytesBuffer.String())
+	if len(resultString) == 0 {
+		return nil, errors.New("pgpool returns empty version information")
+	}
+	version := c.ExtractVersion(resultString)
+	if len(version) == 0 {
+		return nil, fmt.Errorf("can't extract pgpool version from string: %s", resultString)
+	}
+	pgpoolVersion, err := semver.NewVersion(version)
+	if err != nil {
+		return nil, err
+	}
+	c.version = pgpoolVersion
+	return pgpoolVersion, nil
+}
+
+func (c *Client) ExtractVersion(line string) string {
+	valueArr := PGPoolVersionRegExp.FindStringSubmatch(line)
+	if len(valueArr) > 0 {
+		return valueArr[1]
+	}
+	return ""
 }
 
 func (c *Client) createPCPTempFile() error {
@@ -142,7 +203,7 @@ func (c *Client) Validate() error {
 			return fmt.Errorf("pcppass %s does not exist", c.pcpPassFile)
 		}
 		if err != nil {
-			return fmt.Errorf("cannot retrieve file mode from `Stat`: %v", err)
+			return fmt.Errorf("cannot retrieve file mode: %v", err)
 		}
 		if info.IsDir() {
 			return fmt.Errorf("pcppass must be a file")
@@ -152,35 +213,72 @@ func (c *Client) Validate() error {
 		}
 		c.pcpPassFileUser = true
 	} else if len(c.options.Password) == 0 {
-		return errors.New("PCP password (or pcppass file) must be specified")
+		return errors.New("PCP password or pcppass file (pgpool-II 3.5 and above) must be specified")
 	}
 	return nil
 }
 
-func (c *Client) execCommand(cmd string, arg ...string) (*bytes.Buffer, error) {
+func (c *Client) execPCPCommand(cmd string, arg ...string) (*bytes.Buffer, error) {
+	var (
+		argCommon []string
+		env       []string
+		argResult []string
+	)
+	if c.pcpPassFileSupport {
+		argCommon = []string{
+			fmt.Sprintf("--username=%s", c.options.Username),
+			fmt.Sprintf("--host=%s", c.options.Hostname),
+			fmt.Sprintf("--port=%d", c.options.Port),
+			// never prompt for password
+			"--no-password",
+		}
+		env = []string{
+			fmt.Sprintf("PCPPASSFILE=%s", c.pcpPassFile),
+		}
+		argResult = append(argCommon, arg...)
+	} else {
+		// [global options] timeout hostname port username password [command arguments]
+		for _, ar := range arg {
+			if strings.HasPrefix(ar, "-") {
+				argResult = append(argResult, ar)
+			}
+		}
+		argResult = append(argResult, []string{
+			strconv.Itoa(c.options.Timeout),
+			c.options.Hostname,
+			strconv.Itoa(c.options.Port),
+			c.options.Username,
+			c.options.Password,
+		}...)
+		for _, ar := range arg {
+			if !strings.HasPrefix(ar, "-") {
+				argResult = append(argResult, ar)
+			}
+		}
+	}
+	stdOut, _, err := c.execCommand(cmd, env, argResult...)
+	if err != nil {
+		return stdOut, fmt.Errorf("%v (%s)", err, strings.TrimSpace(stdOut.String()))
+	}
+	return stdOut, nil
+}
+
+func (c *Client) execCommand(cmd string, env []string, arg ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	stdoutBuffer := &bytes.Buffer{}
-	argCommon := []string{
-		fmt.Sprintf("--username=%s", c.options.Username),
-		fmt.Sprintf("--host=%s", c.options.Hostname),
-		fmt.Sprintf("--port=%d", c.options.Port),
-		// never prompt for password
-		"--no-password",
-	}
-	argResult := append(argCommon, arg...)
-	pgpoolExec := exec.Command(cmd, argResult...)
-	pgpoolExec.Env = []string{
-		fmt.Sprintf("PCPPASSFILE=%s", c.pcpPassFile),
-	}
+	stderrBuffer := &bytes.Buffer{}
+	pgpoolExec := exec.Command(cmd, arg...)
+	pgpoolExec.Env = env
 	pgpoolExec.Stdout = stdoutBuffer
+	pgpoolExec.Stderr = stderrBuffer
 	err := pgpoolExec.Run()
 	if err != nil {
-		return stdoutBuffer, err
+		return stdoutBuffer, stderrBuffer, err
 	}
-	return stdoutBuffer, nil
+	return stdoutBuffer, stderrBuffer, nil
 }
 
 func (c *Client) ExecNodeCount() (int, error) {
-	bytesBuffer, err := c.execCommand(PCPNodeCount)
+	bytesBuffer, err := c.execPCPCommand(PCPNodeCount)
 	if err != nil {
 		return 0, err
 	}
@@ -273,7 +371,15 @@ func NodeInfoUnmarshal(cmdOutBuff io.Reader) (NodeInfo, error) {
 }
 
 func (c *Client) ExecNodeInfo(nodeID int) (NodeInfo, error) {
-	bytesBuffer, err := c.execCommand(PCPNodeInfo, fmt.Sprintf("--node-id=%d", nodeID), "-v")
+	var (
+		err         error
+		bytesBuffer *bytes.Buffer
+	)
+	if c.pcpPassFileSupport {
+		bytesBuffer, err = c.execPCPCommand(PCPNodeInfo, fmt.Sprintf("--node-id=%d", nodeID), "-v")
+	} else {
+		bytesBuffer, err = c.execPCPCommand(PCPNodeInfo, strconv.Itoa(nodeID), "-v")
+	}
 	if err != nil {
 		return NodeInfo{}, err
 	}
@@ -285,7 +391,7 @@ func (c *Client) ExecNodeInfo(nodeID int) (NodeInfo, error) {
 }
 
 func (c *Client) ExecProcInfo() ([]ProcInfo, error) {
-	bytesBuffer, err := c.execCommand(PCPProcInfo, "--all")
+	bytesBuffer, err := c.execPCPCommand(PCPProcInfo, "--all")
 	if err != nil {
 		return []ProcInfo{}, err
 	}
@@ -333,7 +439,7 @@ func (c *Client) ProcInfoSummary(pi []ProcInfo) ProcInfoSummary {
 }
 
 func (c *Client) ExecProcCount() ([]string, error) {
-	bytesBuffer, err := c.execCommand(PCPProcCount)
+	bytesBuffer, err := c.execPCPCommand(PCPProcCount)
 	if err != nil {
 		return []string{}, err
 	}
@@ -347,7 +453,7 @@ func (c *Client) ExecProcCount() ([]string, error) {
 }
 
 func (c *Client) ExecWatchdogInfo() (WatchdogInfo, error) {
-	bytesBuffer, err := c.execCommand(PCPWatchdogInfo, "-v")
+	bytesBuffer, err := c.execPCPCommand(PCPWatchdogInfo, "-v")
 	if err != nil {
 		return WatchdogInfo{}, err
 	}

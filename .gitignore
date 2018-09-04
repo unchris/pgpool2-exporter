@@ -29,3 +29,4 @@ pgpool2-exporter
 coverage.out
 debug.test
 .pcppass
+exporter

@@ -19,11 +19,12 @@ var (
 	showVersion   = flag.Bool("version", false, "Prints version information and exit")
 	metricsPath   = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 	listenAddress = flag.String("web.listen-address", ":9288", "Address on which to expose metrics and web interface.")
-	pcpPassFile   = flag.String("pcp.passfile", "", "Path to the PCP password file containing hostname:port:username:password")
+	pcpPassFile   = flag.String("pcp.passfile", "", "Path to the PCP password file containing hostname:port:username:password (pgpool-II 3.5 and above only)")
 	pcpHostname   = flag.String("pcp.host", "127.0.0.1", "PCP hostname")
 	pcpPort       = flag.Int("pcp.port", 9898, "PCP port")
 	pcpUsername   = flag.String("pcp.username", "pcpadmin", "PCP username")
 	pcpPassword   = flag.String("pcp.password", "", "PCP password")
+	pcpTimeout    = flag.Int("pcp.timeout", 10, "connection timeout value in seconds (pgpool-II 3.4.9 and below only)")
 )
 
 func versionInfo() {
@@ -51,6 +52,7 @@ func main() {
 		Hostname: *pcpHostname,
 		Port:     *pcpPort,
 		PassFile: *pcpPassFile,
+		Timeout:  *pcpTimeout,
 	}
 
 	pgpool2Client, err := pgpool2.NewClient(options)
