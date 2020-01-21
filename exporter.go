@@ -36,7 +36,7 @@ var (
 	PoolNodeInfo = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "node_info"),
 		"Displays the information of node",
-		[]string{"id", "node", "port", "width", "role"}, nil,
+		[]string{"id", "node", "port", "width", "role", "replicationDelay", "replicationState", "replicationSyncState", "lastStatusChange"}, nil,
 	)
 	PoolProcCount = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "proc_count"),
@@ -118,6 +118,10 @@ func (e *Exporter) collectNodeMetrics(ch chan<- prometheus.Metric) error {
 			strconv.Itoa(nodeInfo.Port),
 			strconv.FormatFloat(nodeInfo.Weight, 'f', 6, 64),
 			nodeInfo.Role,
+			strconv.FormatFloat(nodeInfo.ReplicationDelay, 'f', 6, 64),
+			nodeInfo.ReplicationState,
+			nodeInfo.ReplicationSyncState,
+			nodeInfo.LastStatusChange,
 		)
 	}
 	return nil

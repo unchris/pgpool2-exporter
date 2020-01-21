@@ -200,12 +200,16 @@ func (c *Client) ExecNodeCount() (int, error) {
 }
 
 type NodeInfo struct {
-	Hostname   string
-	Port       int
-	StatusCode int
-	Status     string
-	Weight     float64
-	Role       string
+	Hostname                 string
+	Port                     int
+	StatusCode               int
+	Status                   string
+	Weight                   float64
+	Role                     string
+	ReplicationDelay         float64
+	ReplicationState         string
+	ReplicationSyncState     string
+	LastStatusChange         string
 }
 
 func NodeStatusCodeToString(statusID int) string {
@@ -267,6 +271,23 @@ func NodeInfoUnmarshal(cmdOutBuff io.Reader) (NodeInfo, error) {
 		}
 		if strings.Contains(line, "Role") {
 			ni.Role = ExtractValueFromPCPString(line)
+		}
+		if strings.Contains(line, "Replication Delay") {
+			delay := ExtractValueFromPCPString(line)
+			delayFloat, err := strconv.ParseFloat(delay, 64)
+			if err != nil {
+				continue
+			}
+			ni.ReplicationDelay = delayFloat
+		}
+		if strings.Contains(line, "Replication State") {
+			ni.ReplicationState = ExtractValueFromPCPString(line)
+		}
+		if strings.Contains(line, "Replication Sync State") {
+			ni.ReplicationSyncState = ExtractValueFromPCPString(line)
+		}
+		if strings.Contains(line, "Last Status Change") {
+			ni.LastStatusChange = ExtractValueFromPCPString(line)
 		}
 	}
 	return ni, nil
